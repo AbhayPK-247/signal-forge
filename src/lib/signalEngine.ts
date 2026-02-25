@@ -316,3 +316,133 @@ export const FAULT_LABELS: Record<FaultType, string> = {
   sample_loss: 'Sample Loss',
   power_supply_ripple: 'Power Supply Ripple',
 };
+
+// ─── Multi-Fault Configuration ────────────────────────────────────────
+
+export type FaultTypeKey = Exclude<FaultType, 'none'>;
+
+export interface FaultConfig {
+  enabled: boolean;
+  severity: number; // 0–5
+  frequency: number;
+}
+
+export type MultiFaultConfig = Record<FaultTypeKey, FaultConfig>;
+
+export const SEVERITY_LABELS = ['Off', 'Very Low', 'Low', 'Medium', 'High', 'Severe'];
+
+export const FAULT_TYPE_KEYS: FaultTypeKey[] = [
+  'ground_fault', 'ground_loop', 'floating_ground', 'emi_rfi',
+  'open_circuit', 'short_circuit', 'cable_attenuation', 'impedance_mismatch',
+  'noise_injection', 'power_line', 'signal_clipping', 'signal_distortion',
+  'sensor_offset', 'sensor_drift', 'sensor_saturation', 'gain_error',
+  'quantization_error', 'aliasing', 'timing_jitter', 'sample_loss',
+  'power_supply_ripple',
+];
+
+/** Faults that use a configurable frequency parameter */
+export const PERIODIC_FAULTS: Set<FaultTypeKey> = new Set([
+  'ground_loop', 'emi_rfi', 'power_supply_ripple',
+]);
+
+export function createDefaultMultiFaultConfig(): MultiFaultConfig {
+  const config = {} as MultiFaultConfig;
+  for (const key of FAULT_TYPE_KEYS) {
+    config[key] = { enabled: false, severity: 3, frequency: 50 };
+  }
+  return config;
+}
+
+export function applyMultiFault(signal: number[], t: number[], config: MultiFaultConfig): number[] {
+  let result = [...signal];
+  for (const [type, cfg] of Object.entries(config) as [FaultTypeKey, FaultConfig][]) {
+    if (cfg.enabled && cfg.severity > 0) {
+      const magnitude = cfg.severity * 0.4; // severity 5 → magnitude 2.0
+      result = applyFault(result, t, type, { magnitude, frequency: cfg.frequency });
+    }
+  }
+  return result;
+}
+
+export function hasActiveFaults(config: MultiFaultConfig): boolean {
+  return Object.values(config).some(c => c.enabled && c.severity > 0);
+}
+
+// ─── Power Spectral Density ───────────────────────────────────────────
+
+export function computePSD(signal: number[], samplingRate: number) {
+  const fftResult = computeFFT(signal, samplingRate);
+  return {
+    frequencies: fftResult.frequencies,
+    power: fftResult.magnitudes.map(m => m * m),
+  };
+}
+
+// ─── Short-Time Fourier Transform (Spectrogram) ──────────────────────
+
+export function computeSTFT(
+  signal: number[],
+  samplingRate: number,
+  windowSize = 256,
+  hopSize = 128
+): { times: number[]; frequencies: number[]; power: number[][] } {
+  const clean = signal.map(x => (isNaN(x) ? 0 : x));
+  const maxWindows = 80;
+  const numWindows = Math.min(maxWindows, Math.max(0, Math.floor((clean.length - windowSize) / hopSize) + 1));
+  if (numWindows <= 0) return { times: [], frequencies: [], power: [] };
+
+  const freqBins = Math.floor(windowSize / 2);
+  const times: number[] = [];
+  const frequencies: number[] = Array.from({ length: freqBins }, (_, k) => (k * samplingRate) / windowSize);
+  const power: number[][] = [];
+
+  for (let w = 0; w < numWindows; w++) {
+    const start = w * hopSize;
+    times.push(start / samplingRate);
+    const seg = clean.slice(start, start + windowSize);
+    // Hann window
+    const windowed = seg.map((x, n) => x * 0.5 * (1 - Math.cos((2 * Math.PI * n) / (windowSize - 1))));
+
+    const mags: number[] = [];
+    for (let k = 0; k < freqBins; k++) {
+      let re = 0,
+        im = 0;
+      for (let n = 0; n < windowSize; n++) {
+        const angle = (2 * Math.PI * k * n) / windowSize;
+        re += windowed[n] * Math.cos(angle);
+        im -= windowed[n] * Math.sin(angle);
+      }
+      mags.push((re * re + im * im) / (windowSize * windowSize));
+    }
+    power.push(mags);
+  }
+
+  return { times, frequencies, power };
+}
+
+// ─── Windowed Statistics (Feature Trends) ─────────────────────────────
+
+export interface WindowedStat {
+  time: number;
+  mean: number;
+  rms: number;
+  variance: number;
+}
+
+export function computeWindowedStats(signal: number[], t: number[], windowSize: number): WindowedStat[] {
+  const results: WindowedStat[] = [];
+  for (let i = 0; i + windowSize <= signal.length; i += windowSize) {
+    const win = signal.slice(i, i + windowSize).filter(x => !isNaN(x));
+    if (win.length === 0) continue;
+    const mean = win.reduce((a, b) => a + b, 0) / win.length;
+    const variance = win.reduce((a, x) => a + (x - mean) ** 2, 0) / win.length;
+    const rms = Math.sqrt(win.reduce((a, x) => a + x * x, 0) / win.length);
+    results.push({
+      time: t[i + Math.floor(windowSize / 2)] ?? t[i],
+      mean,
+      rms,
+      variance,
+    });
+  }
+  return results;
+}

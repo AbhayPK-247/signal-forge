@@ -2,85 +2,111 @@ import { useState, useCallback, useMemo } from 'react';
 import {
   type SignalType,
   type SignalParams,
-  type FaultType,
-  type FaultParams,
+  type MultiFaultConfig,
   DEFAULT_PARAMS,
-  DEFAULT_FAULT_PARAMS,
+  createDefaultMultiFaultConfig,
   generateTimeVector,
   generateSignal,
-  applyFault,
+  applyMultiFault,
+  hasActiveFaults,
   computeStats,
   computeFFT,
+  computePSD,
+  computeSTFT,
+  computeWindowedStats,
 } from '@/lib/signalEngine';
 import SignalControls from '@/components/SignalControls';
 import FaultControls from '@/components/FaultControls';
 import WaveformChart from '@/components/WaveformChart';
 import FFTChart from '@/components/FFTChart';
 import HistogramChart from '@/components/HistogramChart';
+import PSDChart from '@/components/PSDChart';
+import SpectrogramChart from '@/components/SpectrogramChart';
+import FeatureTrendChart from '@/components/FeatureTrendChart';
 import StatsDisplay from '@/components/StatsDisplay';
+
+type AnalysisTab = 'waveform' | 'spectral' | 'advanced';
 
 const Index = () => {
   const [signalType, setSignalType] = useState<SignalType>('sine');
   const [params, setParams] = useState<SignalParams>(DEFAULT_PARAMS);
-  const [faultType, setFaultType] = useState<FaultType>('none');
-  const [faultParams, setFaultParams] = useState<FaultParams>(DEFAULT_FAULT_PARAMS);
+  const [faultConfig, setFaultConfig] = useState<MultiFaultConfig>(createDefaultMultiFaultConfig());
   const [showOriginal, setShowOriginal] = useState(true);
   const [generated, setGenerated] = useState(false);
+  const [activeTab, setActiveTab] = useState<AnalysisTab>('waveform');
 
   const [time, setTime] = useState<number[]>([]);
   const [original, setOriginal] = useState<number[]>([]);
   const [faulted, setFaulted] = useState<number[]>([]);
 
+  const hasFaults = useMemo(() => hasActiveFaults(faultConfig), [faultConfig]);
+
   const generate = useCallback(() => {
     const t = generateTimeVector(params);
     const sig = generateSignal(signalType, params, t);
-    const fSig = applyFault(sig, t, faultType, faultParams);
+    const fSig = applyMultiFault(sig, t, faultConfig);
     setTime(t);
     setOriginal(sig);
     setFaulted(fSig);
     setGenerated(true);
-  }, [signalType, params, faultType, faultParams]);
+  }, [signalType, params, faultConfig]);
 
-  // Re-apply fault when fault changes (if already generated)
-  const applyFaultLive = useCallback((ft: FaultType, fp: FaultParams) => {
-    if (original.length === 0) return;
-    const fSig = applyFault(original, time, ft, fp);
-    setFaulted(fSig);
-  }, [original, time]);
+  const applyFaultLive = useCallback(
+    (config: MultiFaultConfig) => {
+      if (original.length === 0) return;
+      setFaulted(applyMultiFault(original, time, config));
+    },
+    [original, time]
+  );
 
-  const handleFaultTypeChange = useCallback((ft: FaultType) => {
-    setFaultType(ft);
-    applyFaultLive(ft, faultParams);
-  }, [faultParams, applyFaultLive]);
-
-  const handleFaultParamsChange = useCallback((fp: FaultParams) => {
-    setFaultParams(fp);
-    applyFaultLive(faultType, fp);
-  }, [faultType, applyFaultLive]);
+  const handleFaultConfigChange = useCallback(
+    (config: MultiFaultConfig) => {
+      setFaultConfig(config);
+      applyFaultLive(config);
+    },
+    [applyFaultLive]
+  );
 
   const reset = useCallback(() => {
     setSignalType('sine');
     setParams(DEFAULT_PARAMS);
-    setFaultType('none');
-    setFaultParams(DEFAULT_FAULT_PARAMS);
+    setFaultConfig(createDefaultMultiFaultConfig());
     setTime([]);
     setOriginal([]);
     setFaulted([]);
     setGenerated(false);
+    setActiveTab('waveform');
   }, []);
 
   const stats = useMemo(() => {
     if (!generated) return null;
-    return computeStats(faulted, faultType !== 'none' ? original : undefined);
-  }, [faulted, original, faultType, generated]);
+    return computeStats(faulted, hasFaults ? original : undefined);
+  }, [faulted, original, hasFaults, generated]);
 
   const fft = useMemo(() => {
     if (!generated || faulted.length === 0) return null;
-    // Limit FFT size for performance
     const maxSamples = 2048;
     const sig = faulted.length > maxSamples ? faulted.slice(0, maxSamples) : faulted;
     return computeFFT(sig, params.samplingRate);
   }, [faulted, params.samplingRate, generated]);
+
+  const psd = useMemo(() => {
+    if (!generated || faulted.length === 0) return null;
+    const maxSamples = 2048;
+    const sig = faulted.length > maxSamples ? faulted.slice(0, maxSamples) : faulted;
+    return computePSD(sig, params.samplingRate);
+  }, [faulted, params.samplingRate, generated]);
+
+  const stft = useMemo(() => {
+    if (!generated || faulted.length === 0) return null;
+    return computeSTFT(faulted, params.samplingRate);
+  }, [faulted, params.samplingRate, generated]);
+
+  const windowedStats = useMemo(() => {
+    if (!generated || faulted.length === 0 || time.length === 0) return null;
+    const windowSize = Math.max(16, Math.floor(faulted.length / 50));
+    return computeWindowedStats(faulted, time, windowSize);
+  }, [faulted, time, generated]);
 
   const exportCSV = useCallback(() => {
     if (!generated) return;
@@ -90,10 +116,16 @@ const Index = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `signal_${signalType}_${faultType}.csv`;
+    a.download = `signal_${signalType}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [generated, time, original, faulted, signalType, faultType]);
+  }, [generated, time, original, faulted, signalType]);
+
+  const TABS: { key: AnalysisTab; label: string }[] = [
+    { key: 'waveform', label: 'Waveform' },
+    { key: 'spectral', label: 'Spectral' },
+    { key: 'advanced', label: 'Advanced' },
+  ];
 
   return (
     <div className="min-h-screen bg-background grid-background">
@@ -104,7 +136,7 @@ const Index = () => {
           <h1 className="font-display text-sm font-bold tracking-wider neon-text">
             SIGNAL GENERATOR
           </h1>
-          <span className="text-[10px] text-muted-foreground tracking-wider">v1.0</span>
+          <span className="text-[10px] text-muted-foreground tracking-wider">v2.0</span>
         </div>
         <div className="flex items-center gap-2">
           {generated && (
@@ -128,7 +160,7 @@ const Index = () => {
 
       {/* Main Layout */}
       <div className="flex h-[calc(100vh-41px)]">
-        {/* Left Sidebar - Controls */}
+        {/* Left Sidebar */}
         <aside className="w-[260px] shrink-0 border-r border-border/50 overflow-y-auto p-3 space-y-3">
           <SignalControls
             signalType={signalType}
@@ -138,12 +170,7 @@ const Index = () => {
             onGenerate={generate}
             onReset={reset}
           />
-          <FaultControls
-            faultType={faultType}
-            faultParams={faultParams}
-            onFaultTypeChange={handleFaultTypeChange}
-            onFaultParamsChange={handleFaultParamsChange}
-          />
+          <FaultControls config={faultConfig} onChange={handleFaultConfigChange} />
         </aside>
 
         {/* Center - Charts */}
@@ -151,11 +178,9 @@ const Index = () => {
           {!generated ? (
             <div className="flex-1 flex items-center justify-center oscilloscope-display">
               <div className="text-center space-y-3">
-                <div className="font-display text-2xl font-bold neon-text tracking-wider">
-                  READY
-                </div>
+                <div className="font-display text-2xl font-bold neon-text tracking-wider">READY</div>
                 <p className="text-muted-foreground text-sm">
-                  Select a signal type and click Generate
+                  Select a signal type, configure faults, and click Generate
                 </p>
                 <div className="flex gap-1 justify-center">
                   {[0, 1, 2, 3, 4].map(i => (
@@ -170,22 +195,80 @@ const Index = () => {
             </div>
           ) : (
             <>
-              <div className="flex-1 min-h-0" style={{ flex: '2 1 0' }}>
-                <WaveformChart
-                  time={time}
-                  original={original}
-                  faulted={faulted}
-                  showOriginal={showOriginal && faultType !== 'none'}
-                />
+              {/* Tab bar */}
+              <div className="flex gap-1">
+                {TABS.map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveTab(tab.key)}
+                    className={`signal-button text-[10px] ${activeTab === tab.key ? 'signal-button-active' : ''}`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
-              <div className="flex gap-3 min-h-0" style={{ flex: '1 1 0' }}>
-                <div className="flex-1">
-                  {fft && <FFTChart frequencies={fft.frequencies} magnitudes={fft.magnitudes} />}
-                </div>
-                <div className="flex-1">
-                  <HistogramChart signal={faulted} />
-                </div>
-              </div>
+
+              {/* Tab content */}
+              {activeTab === 'waveform' && (
+                <>
+                  <div className="flex-1 min-h-0" style={{ flex: '2 1 0' }}>
+                    <WaveformChart
+                      time={time}
+                      original={original}
+                      faulted={faulted}
+                      showOriginal={showOriginal && hasFaults}
+                    />
+                  </div>
+                  <div className="flex gap-3 min-h-0" style={{ flex: '1 1 0' }}>
+                    <div className="flex-1">
+                      {fft && <FFTChart frequencies={fft.frequencies} magnitudes={fft.magnitudes} />}
+                    </div>
+                    <div className="flex-1">
+                      <HistogramChart signal={faulted} />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {activeTab === 'spectral' && (
+                <>
+                  <div className="flex gap-3 min-h-0" style={{ flex: '1 1 0' }}>
+                    <div className="flex-1">
+                      {psd && <PSDChart frequencies={psd.frequencies} power={psd.power} />}
+                    </div>
+                    <div className="flex-1">
+                      {fft && <FFTChart frequencies={fft.frequencies} magnitudes={fft.magnitudes} />}
+                    </div>
+                  </div>
+                  <div className="flex-1 min-h-0" style={{ flex: '1 1 0' }}>
+                    {stft && (
+                      <SpectrogramChart
+                        times={stft.times}
+                        frequencies={stft.frequencies}
+                        power={stft.power}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+
+              {activeTab === 'advanced' && (
+                <>
+                  <div className="flex-1 min-h-0" style={{ flex: '1 1 0' }}>
+                    {windowedStats && windowedStats.length > 0 && (
+                      <FeatureTrendChart stats={windowedStats} />
+                    )}
+                  </div>
+                  <div className="flex gap-3 min-h-0" style={{ flex: '1 1 0' }}>
+                    <div className="flex-1">
+                      <HistogramChart signal={faulted} />
+                    </div>
+                    <div className="flex-1">
+                      {psd && <PSDChart frequencies={psd.frequencies} power={psd.power} />}
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           )}
         </main>
@@ -193,7 +276,7 @@ const Index = () => {
         {/* Right Sidebar - Stats */}
         {generated && stats && (
           <aside className="w-[200px] shrink-0 border-l border-border/50 overflow-y-auto p-3">
-            <StatsDisplay stats={stats} label={faultType !== 'none' ? 'Faulted Stats' : 'Signal Stats'} />
+            <StatsDisplay stats={stats} label={hasFaults ? 'Faulted Stats' : 'Signal Stats'} />
           </aside>
         )}
       </div>
