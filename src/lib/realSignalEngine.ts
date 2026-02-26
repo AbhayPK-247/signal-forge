@@ -206,7 +206,60 @@ export function generateIdealSignal(p: IdealParams): { time: number[]; signal: n
                 const T = 1 / p.frequency;
                 return 2 * p.amplitude * (ti / T - Math.floor(0.5 + ti / T));
             }
+            default: return 0;
         }
     });
     return { time, signal };
 }
+
+// ─── Built-in Signal Library ───────────────────────────────────────────
+
+export const BUILTIN_SIGNALS: Record<string, () => ParsedSignal> = {
+    'Speech (Simulated)': () => {
+        const sr = 16000;
+        const dur = 1;
+        const t = Array.from({ length: sr * dur }, (_, i) => i / sr);
+        // Sum of varied sines to mock speech formants
+        const signal = t.map(ti => (
+            Math.sin(2 * Math.PI * 440 * ti) * 0.4 +
+            Math.sin(2 * Math.PI * 880 * ti) * 0.2 +
+            Math.sin(2 * Math.PI * 1320 * ti) * 0.1 +
+            (Math.random() - 0.5) * 0.05
+        ));
+        return { time: t, signal, sampleRate: sr, label: 'Speech (Simulated)' };
+    },
+    'Industrial Vibration': () => {
+        const sr = 5000;
+        const dur = 1;
+        const t = Array.from({ length: sr * dur }, (_, i) => i / sr);
+        // Bearing fault mock: 50Hz shaft + 320Hz bearing rattle
+        const signal = t.map(ti => (
+            Math.sin(2 * Math.PI * 50 * ti) * 0.5 +
+            Math.sin(2 * Math.PI * 320 * ti) * (0.2 * Math.sin(2 * Math.PI * 5 * ti)) +
+            (Math.random() - 0.5) * 0.1
+        ));
+        return { time: t, signal, sampleRate: sr, label: 'Industrial Vibration' };
+    },
+    'Power Line Noise': () => {
+        const sr = 1000;
+        const dur = 1;
+        const t = Array.from({ length: sr * dur }, (_, i) => i / sr);
+        const signal = t.map(ti => (
+            Math.sin(2 * Math.PI * 50 * ti) +
+            Math.sin(2 * Math.PI * 150 * ti) * 0.2 + // 3rd harmonic
+            (Math.random() - 0.5) * 0.05
+        ));
+        return { time: t, signal, sampleRate: sr, label: 'Power Line Noise' };
+    },
+    'Noisy Sensor Drift': () => {
+        const sr = 500;
+        const dur = 2;
+        const t = Array.from({ length: sr * dur }, (_, i) => i / sr);
+        const signal = t.map(ti => (
+            0.5 * ti + // linear drift
+            0.2 * Math.sin(2 * Math.PI * 0.2 * ti) + // slow oscillation
+            (Math.random() - 0.5) * 0.3
+        ));
+        return { time: t, signal, sampleRate: sr, label: 'Noisy Sensor Drift' };
+    }
+};

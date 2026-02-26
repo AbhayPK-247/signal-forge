@@ -1,5 +1,4 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import { useMicrophone } from '@/hooks/useMicrophone';
 import { useAudioPlayer } from '@/hooks/useAudioPlayer';
 import {
@@ -18,6 +17,7 @@ import {
 } from '@/lib/signalEngine';
 import RealSignalControls, { type SignalSource } from '@/components/RealSignalControls';
 import RealSignalCharts from '@/components/RealSignalCharts';
+import MainLayout from '@/components/MainLayout';
 
 const DEFAULT_IDEAL: IdealParams = {
     type: 'sine' as IdealType,
@@ -31,9 +31,9 @@ const fmt = (v: number | null, d = 4, unit = '') =>
     v === null || !isFinite(v) ? '—' : `${v.toFixed(d)}${unit}`;
 
 const StatRow = ({ label, value }: { label: string; value: string }) => (
-    <div className="flex flex-col gap-0.5">
-        <span className="label-text text-[9px] text-muted-foreground">{label}</span>
-        <span className="font-mono text-xs text-primary">{value}</span>
+    <div className="flex flex-col gap-0.5 border-b border-white/5 pb-1">
+        <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">{label}</span>
+        <span className="font-mono text-[10px] text-primary">{value}</span>
     </div>
 );
 
@@ -45,27 +45,21 @@ const RealSignalLab = () => {
     const [showFaulted, setShowFaulted] = useState(false);
     const [idealParams, setIdealParams] = useState<IdealParams>(DEFAULT_IDEAL);
 
-    // Microphone
     const { state: micState, getSamples, getFreqData, start: micStart, stop: micStop } = useMicrophone(fftSize);
-
-    // Audio Player
     const { playSignal, stop: audioStop, isPlaying } = useAudioPlayer();
 
     const hasFaults = useMemo(() => hasActiveFaults(faultConfig), [faultConfig]);
 
-    // Apply fault to file signal
     const faultedSignal = useMemo(() => {
         if (!parsedFile || !showFaulted || !hasFaults) return null;
         return applyMultiFault(parsedFile.signal, parsedFile.time, faultConfig);
     }, [parsedFile, showFaulted, hasFaults, faultConfig]);
 
-    // Ideal signal for comparison
     const { time: idealTime, signal: idealSignal } = useMemo(() => {
         if (source !== 'comparison') return { time: [], signal: [] };
         return generateIdealSignal(idealParams);
     }, [source, idealParams]);
 
-    // Live Stats for Microphone
     const [liveStats, setLiveStats] = useState<any>(null);
     useEffect(() => {
         if (source !== 'microphone' || micState.status !== 'live') {
@@ -79,7 +73,6 @@ const RealSignalLab = () => {
         return () => clearInterval(interval);
     }, [source, micState.status, getSamples]);
 
-    // Stats on the current signal
     const stats = useMemo(() => {
         if (source === 'microphone') return liveStats;
         if (!parsedFile) return null;
@@ -100,7 +93,6 @@ const RealSignalLab = () => {
 
     const handleSourceChange = useCallback((s: SignalSource) => {
         setSource(s);
-        // Stop mic when switching away
         if (s !== 'microphone') micStop();
         audioStop();
     }, [micStop, audioStop]);
@@ -158,37 +150,15 @@ const RealSignalLab = () => {
 
         if (signalToMod.length === 0) return;
 
-        // Store in sessionStorage to bridge to ModulationLab
         sessionStorage.setItem('bridge_signal', JSON.stringify(signalToMod));
         sessionStorage.setItem('bridge_fs', Fs.toString());
         window.location.href = '/modulation?source=real';
     }, [source, getSamples, micState.sampleRate, parsedFile, showFaulted, faultedSignal]);
 
     return (
-        <div className="min-h-screen bg-background grid-background">
-            {/* Header */}
-            <header className="border-b border-border/50 px-4 py-2 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-accent animate-pulse-neon" style={{ boxShadow: '0 0 8px hsl(var(--accent))' }} />
-                    <h1 className="font-display text-sm font-bold tracking-wider" style={{ color: 'hsl(var(--accent))', textShadow: '0 0 10px hsl(var(--accent)/0.5)' }}>
-                        REAL SIGNAL LAB
-                    </h1>
-                    <span className="text-[10px] text-muted-foreground tracking-wider">v1.0</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    {micState.status === 'live' && (
-                        <span className="text-[9px] text-primary animate-pulse font-mono">● LIVE 44.1kHz</span>
-                    )}
-                    <Link to="/" className="signal-button text-[10px]">Signal Gen</Link>
-                    <Link to="/modulation" className="signal-button text-[10px]">Modulation Lab</Link>
-                    <Link to="/recording" className="signal-button text-[10px]">Recording Lab</Link>
-                </div>
-            </header>
-
-            {/* Main Layout */}
-            <div className="flex h-[calc(100vh-41px)]">
-                {/* Left Sidebar */}
-                <aside className="w-[260px] shrink-0 border-r border-border/50 overflow-y-auto p-3 space-y-3">
+        <MainLayout activeLab="real-signal">
+            <div className="flex h-full">
+                <aside className="w-[260px] shrink-0 border-r border-border/50 overflow-y-auto p-3 space-y-3 bg-black/10">
                     <RealSignalControls
                         source={source}
                         micStatus={micState.status}
@@ -216,39 +186,34 @@ const RealSignalLab = () => {
                     />
                 </aside>
 
-                {/* Center */}
-                <main className="flex-1 flex flex-col p-3 gap-3 min-w-0">
-                    <RealSignalCharts
-                        source={source}
-                        micStatus={micState.status}
-                        getSamples={getSamples}
-                        getFreqData={getFreqData}
-                        micSampleRate={micState.sampleRate}
-                        fftSize={fftSize}
-                        parsedFile={parsedFile}
-                        faultedSignal={faultedSignal}
-                        idealTime={idealTime}
-                        idealSignal={idealSignal}
-                        showFaulted={showFaulted}
-                    />
+                <main className="flex-1 flex flex-col p-3 gap-3 min-w-0 bg-black/5">
+                    <div className="flex-1 bg-black/20 rounded-lg border border-border/30 overflow-hidden">
+                        <RealSignalCharts
+                            source={source}
+                            micStatus={micState.status}
+                            getSamples={getSamples}
+                            getFreqData={getFreqData}
+                            micSampleRate={micState.sampleRate}
+                            fftSize={fftSize}
+                            parsedFile={parsedFile}
+                            faultedSignal={faultedSignal}
+                            idealTime={idealTime}
+                            idealSignal={idealSignal}
+                            showFaulted={showFaulted}
+                        />
+                    </div>
                 </main>
 
-                {/* Right Sidebar — Stats */}
                 {stats && (
-                    <aside className="w-[180px] shrink-0 border-l border-border/50 overflow-y-auto p-3 space-y-3">
+                    <aside className="w-[180px] shrink-0 border-l border-border/50 overflow-y-auto p-3 space-y-3 bg-black/20">
                         <div className="glass-panel p-3 space-y-3">
-                            <div className="section-title">Signal Stats</div>
+                            <div className="section-title uppercase tracking-widest">Signal Stats</div>
                             <div className="space-y-2.5">
                                 <StatRow label="Samples" value={stats.sampleCount.toLocaleString()} />
                                 <StatRow label="Mean" value={fmt(stats.mean, 4, ' V')} />
-                                <StatRow label="Variance" value={fmt(stats.variance)} />
-                                <StatRow label="Std Dev" value={fmt(stats.stdDev, 4, ' V')} />
                                 <StatRow label="RMS" value={fmt(stats.rms, 4, ' V')} />
-                                <StatRow label="Peak" value={fmt(stats.peak, 4, ' V')} />
                                 <StatRow label="P-to-P" value={fmt(stats.peakToPeak, 4, ' V')} />
-                                <StatRow label="Min" value={fmt(stats.min, 4, ' V')} />
-                                <StatRow label="Max" value={fmt(stats.max, 4, ' V')} />
-                                <StatRow label="Skewness" value={fmt(stats.skewness)} />
+                                <StatRow label="Skew" value={fmt(stats.skewness)} />
                                 <StatRow label="Kurtosis" value={fmt(stats.kurtosis)} />
                                 {stats.snr !== null && (
                                     <StatRow label="SNR" value={fmt(stats.snr, 2, ' dB')} />
@@ -258,25 +223,17 @@ const RealSignalLab = () => {
 
                         {parsedFile && (
                             <div className="glass-panel p-3 space-y-2">
-                                <div className="section-title">Source Info</div>
+                                <div className="section-title uppercase tracking-widest">Source Info</div>
                                 <div className="space-y-2">
-                                    <StatRow label="File" value={parsedFile.label.split('/').pop() ?? parsedFile.label} />
                                     <StatRow label="Fs" value={`${parsedFile.sampleRate} Hz`} />
                                     <StatRow label="Length" value={`${(parsedFile.time[parsedFile.time.length - 1] ?? 0).toFixed(3)} s`} />
                                 </div>
                             </div>
                         )}
-
-                        {showFaulted && hasFaults && (
-                            <div className="glass-panel p-3">
-                                <div className="section-title mb-2">Fault Active</div>
-                                <p className="text-[10px] text-destructive">Fault injection applied to real signal</p>
-                            </div>
-                        )}
                     </aside>
                 )}
             </div>
-        </div>
+        </MainLayout>
     );
 };
 

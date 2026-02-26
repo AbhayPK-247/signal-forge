@@ -1,7 +1,7 @@
 // Signal Generation Engine
 // Mathematically correct signal processing formulas
 
-export type SignalType = 'sine' | 'square' | 'triangle' | 'sawtooth' | 'impulse' | 'step' | 'noise';
+export type SignalType = 'sine' | 'square' | 'triangle' | 'sawtooth' | 'impulse' | 'step' | 'noise' | 'harmonics';
 
 export interface SignalParams {
   amplitude: number;
@@ -10,6 +10,46 @@ export interface SignalParams {
   dcOffset: number;
   samplingRate: number;
   duration: number;
+  harmonics?: number[]; // Harmonic amplitudes
+}
+
+export type SweepTypeBase = 'linear' | 'logarithmic';
+
+export interface SweepParams {
+  enabled: boolean;
+  type: SweepTypeBase;
+  fStart: number;
+  fStop: number;
+  aStart: number;
+  aStop: number;
+  pStart: number;
+  pStop: number;
+  duration: number;
+}
+
+export interface HarmonicParams {
+  fundamentalFreq: number;
+  amplitudes: number[]; // Index 0 is fundamental, 1 is 2nd harmonic, etc.
+  phases: number[];
+}
+
+/** 
+ * Transfer Function H(s) = Num(s) / Den(s)
+ * Coefficients in descending order of s: [b_n, ..., b_0] / [a_n, ..., a_0]
+ */
+export interface TransferFunction {
+  num: number[];
+  den: number[];
+}
+
+export type FilterType = 'lowpass' | 'highpass' | 'bandpass' | 'bandstop';
+
+export interface FilterParams {
+  type: FilterType;
+  cutoff: number; // Hz
+  cutoffHigh?: number; // For BPF/BSF
+  order: number;
+  samplingRate: number;
 }
 
 export const DEFAULT_PARAMS: SignalParams = {
@@ -63,9 +103,152 @@ export function generateSignal(type: SignalType, params: SignalParams, t: number
         return A * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2) + DC;
       });
 
+    case 'harmonics': {
+      return generateHarmonicSignal({
+        fundamentalFreq: f,
+        amplitudes: [A, ...(params.harmonics || [])],
+        phases: [phi],
+      }, t, DC);
+    }
+
     default:
       return t.map(() => 0);
   }
+}
+
+export function generateHarmonicSignal(
+  params: HarmonicParams,
+  t: number[],
+  dcOffset: number = 0
+): number[] {
+  return t.map(ti => {
+    let value = dcOffset;
+    params.amplitudes.forEach((amp, i) => {
+      const freq = params.fundamentalFreq * (i + 1);
+      const phase = params.phases[i] || 0;
+      value += amp * Math.sin(2 * Math.PI * freq * ti + phase);
+    });
+    return value;
+  });
+}
+
+export function mixSignals(sigA: number[], sigB: number[], ratio: number = 0.5): number[] {
+  const len = Math.max(sigA.length, sigB.length);
+  const mixed: number[] = new Array(len);
+  for (let i = 0; i < len; i++) {
+    const valA = sigA[i] || 0;
+    const valB = sigB[i] || 0;
+    mixed[i] = valA * (1 - ratio) + valB * ratio;
+  }
+  return mixed;
+}
+
+export function generateSweepSignal(params: SweepParams, t: number[]): { signal: number[], instFreq: number[] } {
+  const { fStart, fStop, aStart, aStop, pStart, pStop, duration: Ts, type } = params;
+  const signal: number[] = new Array(t.length);
+  const instFreq: number[] = new Array(t.length);
+
+  if (type === 'linear') {
+    const kf = (fStop - fStart) / Ts;
+    const ka = (aStop - aStart) / Ts;
+    const kp = (pStop - pStart) / Ts;
+
+    for (let i = 0; i < t.length; i++) {
+      const ti = t[i];
+      const f_t = fStart + kf * ti;
+      const a_t = aStart + ka * ti;
+      const p_t = pStart + kp * ti;
+
+      instFreq[i] = f_t;
+      // Phase is integral of freq: phi(t) = 2pi * (fStart*t + 0.5*kf*t^2)
+      const phase = 2 * Math.PI * (fStart * ti + 0.5 * kf * ti * ti) + p_t;
+      signal[i] = a_t * Math.sin(phase);
+    }
+  } else {
+    // Logarithmic Freq Sweep
+    const r = fStop / fStart;
+    const ka = (aStop - aStart) / Ts;
+    const kp = (pStop - pStart) / Ts;
+
+    if (Math.abs(fStart - fStop) < 0.001 || r <= 1.0) {
+      // Degenerate to linear if frequencies are too close
+      const kf = (fStop - fStart) / Ts;
+      for (let i = 0; i < t.length; i++) {
+        const ti = t[i];
+        const f_t = fStart + kf * ti;
+        const a_t = aStart + ka * ti;
+        const p_t = pStart + kp * ti;
+        instFreq[i] = f_t;
+        const phase = 2 * Math.PI * (fStart * ti + 0.5 * kf * ti * ti) + p_t;
+        signal[i] = a_t * Math.sin(phase);
+      }
+    } else {
+      const lnR = Math.log(r);
+      for (let i = 0; i < t.length; i++) {
+        const ti = t[i];
+        const f_t = fStart * Math.pow(r, ti / Ts);
+        const a_t = aStart + ka * ti;
+        const p_t = pStart + kp * ti;
+        instFreq[i] = f_t;
+        // Phase integral: 2pi * fStart * Ts / ln(r) * (r^(t/Ts) - 1)
+        const phase = 2 * Math.PI * fStart * (Ts / lnR) * (Math.pow(r, ti / Ts) - 1) + p_t;
+        signal[i] = a_t * Math.sin(phase);
+      }
+    }
+  }
+
+  return { signal, instFreq };
+}
+
+export function generateChirpSignal(
+  fStart: number,
+  fStop: number,
+  duration: number,
+  amplitude: number,
+  t: number[]
+): number[] {
+  const k = (fStop - fStart) / duration;
+  return t.map(ti => amplitude * Math.sin(2 * Math.PI * (fStart * ti + (k / 2) * ti * ti)));
+}
+
+// Digital Filter Implementation (Simple IIR approach)
+export function applyFilter(signal: number[], params: FilterParams): number[] {
+  const { type, cutoff, cutoffHigh, order, samplingRate } = params;
+  const dt = 1 / samplingRate;
+  const rc = 1 / (2 * Math.PI * cutoff);
+  const alpha = dt / (rc + dt);
+
+  const result = new Array(signal.length).fill(0);
+
+  if (type === 'lowpass') {
+    let yPrev = signal[0] || 0;
+    for (let i = 0; i < signal.length; i++) {
+      const x = signal[i] || 0;
+      const y = alpha * x + (1 - alpha) * yPrev;
+      result[i] = y;
+      yPrev = y;
+    }
+  } else if (type === 'highpass') {
+    let yPrev = 0;
+    let xPrev = signal[0] || 0;
+    for (let i = 0; i < signal.length; i++) {
+      const x = signal[i] || 0;
+      const y = (1 - alpha) * (yPrev + x - xPrev);
+      result[i] = y;
+      yPrev = y;
+      xPrev = x;
+    }
+  } else if (type === 'bandpass' || type === 'bandstop') {
+    // Basic approximation: Chain LPF and HPF for BPF
+    // For BSF: Original - BPF
+    const low = applyFilter(signal, { ...params, type: 'lowpass', cutoff: cutoffHigh || cutoff * 2 });
+    const band = applyFilter(low, { ...params, type: 'highpass', cutoff: cutoff });
+
+    if (type === 'bandpass') return band;
+    return signal.map((x, i) => x - (band[i] || 0));
+  }
+
+  return result;
 }
 
 // Fault Simulation
@@ -290,6 +473,7 @@ export const SIGNAL_LABELS: Record<SignalType, string> = {
   impulse: 'Impulse',
   step: 'Step',
   noise: 'Gaussian Noise',
+  harmonics: 'Harmonic Gen',
 };
 
 export const FAULT_LABELS: Record<FaultType, string> = {
@@ -445,4 +629,181 @@ export function computeWindowedStats(signal: number[], t: number[], windowSize: 
     });
   }
   return results;
+}
+
+// ─── Digital Communication Analysis ───────────────────────────────────
+
+export interface ConstellationPoint {
+  i: number;
+  q: number;
+}
+
+export function calculateBER(txBits: number[], rxBits: number[]): number {
+  if (txBits.length === 0) return 0;
+  let errors = 0;
+  const len = Math.min(txBits.length, rxBits.length);
+  for (let i = 0; i < len; i++) {
+    if (txBits[i] !== rxBits[i]) errors++;
+  }
+  return errors / len;
+}
+
+export function getConstellationPoints(
+  signal: number[],
+  samplesPerSymbol: number,
+  type: 'ASK' | 'FSK' | 'PSK' | 'QPSK'
+): ConstellationPoint[] {
+  const points: ConstellationPoint[] = [];
+  // Sample at the middle of each symbol
+  for (let i = Math.floor(samplesPerSymbol / 2); i < signal.length; i += samplesPerSymbol) {
+    if (type === 'QPSK') {
+      const ph = Math.atan2(signal[i], signal[i - 1] || 0);
+      points.push({ i: Math.cos(ph), q: Math.sin(ph) });
+    } else {
+      points.push({ i: signal[i], q: 0 });
+    }
+  }
+  return points;
+}
+
+export function getEyeDiagramSegments(
+  signal: number[],
+  samplesPerSymbol: number,
+  numSegments: number = 50
+): number[][] {
+  const segments: number[][] = [];
+  const segmentLength = samplesPerSymbol * 2;
+  for (let i = 0; i < signal.length - segmentLength && segments.length < numSegments; i += samplesPerSymbol) {
+    segments.push(signal.slice(i, i + segmentLength));
+  }
+  return segments;
+}
+
+export function generateRandomBits(count: number): number[] {
+  return Array.from({ length: count }, () => Math.round(Math.random()));
+}
+
+// ─── LTI Systems & Bode Plots ─────────────────────────────────────────
+
+export interface BodePoint {
+  frequency: number;
+  magnitude: number; // in dB
+  phase: number;     // in degrees
+}
+
+/** Evaluates H(s) at a specific complex value s */
+function evaluateTF(tf: TransferFunction, s: { re: number, im: number }) {
+  const evalPoly = (coeffs: number[], s: { re: number, im: number }) => {
+    let resRe = 0;
+    let resIm = 0;
+    // Horner's method for complex polynomial
+    for (const c of coeffs) {
+      // res = res * s + c
+      const nextRe = resRe * s.re - resIm * s.im + c;
+      const nextIm = resRe * s.im + resIm * s.re;
+      resRe = nextRe;
+      resIm = nextIm;
+    }
+    return { re: resRe, im: resIm };
+  };
+
+  const n = evalPoly(tf.num, s);
+  const d = evalPoly(tf.den, s);
+
+  // complex division: (nRe + jnIm) / (dRe + jdIm)
+  const denSq = d.re * d.re + d.im * d.im;
+  if (denSq === 0) return { re: Infinity, im: 0 };
+
+  return {
+    re: (n.re * d.re + n.im * d.im) / denSq,
+    im: (n.im * d.re - n.re * d.im) / denSq
+  };
+}
+
+export function computeBodePlot(tf: TransferFunction, startFreq: number, stopFreq: number, points: number = 200): BodePoint[] {
+  const bode: BodePoint[] = [];
+  const logStart = Math.log10(startFreq);
+  const logStop = Math.log10(stopFreq);
+  const step = (logStop - logStart) / (points - 1);
+
+  for (let i = 0; i < points; i++) {
+    const freq = Math.pow(10, logStart + i * step);
+    const omega = 2 * Math.PI * freq;
+    // s = jw
+    const s = { re: 0, im: omega };
+    const h = evaluateTF(tf, s);
+
+    const magnitude = Math.sqrt(h.re * h.re + h.im * h.im);
+    const magDb = 20 * Math.log10(magnitude || 1e-12);
+    let phaseDeg = (Math.atan2(h.im, h.re) * 180) / Math.PI;
+
+    // Unwrap phase if needed (simple)
+    if (bode.length > 0) {
+      const lastPhase = bode[bode.length - 1].phase;
+      while (phaseDeg - lastPhase > 180) phaseDeg -= 360;
+      while (phaseDeg - lastPhase < -180) phaseDeg += 360;
+    }
+
+    bode.push({ frequency: freq, magnitude: magDb, phase: phaseDeg });
+  }
+  return bode;
+}
+
+/** 
+ * Simulates a continuous LTI system using a robust discrete filter.
+ * Note: fs must be significantly higher than system dynamics.
+ */
+export function simulateSystem(tf: TransferFunction, input: number[], fs: number): number[] {
+  const b = tf.num;
+  const a = tf.den;
+  const output = new Array(input.length).fill(0);
+
+  const x = new Array(b.length).fill(0);
+  const y = new Array(a.length).fill(0);
+
+  for (let i = 0; i < input.length; i++) {
+    for (let j = x.length - 1; j > 0; j--) x[j] = x[j - 1];
+    x[0] = input[i];
+
+    let out = 0;
+    for (let j = 0; j < b.length; j++) {
+      out += b[j] * x[j];
+    }
+    for (let j = 1; j < a.length; j++) {
+      out -= a[j] * y[j];
+    }
+
+    out /= a[0];
+
+    for (let j = y.length - 1; j > 0; j--) y[j] = y[j - 1];
+    y[0] = out;
+
+    output[i] = out;
+  }
+
+  return output;
+}
+
+/**
+ * Exports data to a CSV file and triggers a browser download.
+ */
+export function exportToCSV(data: { [key: string]: number[] }, filename: string) {
+  const keys = Object.keys(data);
+  const rows = data[keys[0]].length;
+  let csvContent = keys.join(',') + '\n';
+
+  for (let i = 0; i < rows; i++) {
+    const row = keys.map(k => data[k][i]);
+    csvContent += row.join(',') + '\n';
+  }
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }

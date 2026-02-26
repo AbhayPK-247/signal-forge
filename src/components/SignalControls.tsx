@@ -9,7 +9,7 @@ interface SignalControlsProps {
   onReset: () => void;
 }
 
-const SIGNAL_TYPES: SignalType[] = ['sine', 'square', 'triangle', 'sawtooth', 'impulse', 'step', 'noise'];
+const SIGNAL_TYPES: SignalType[] = ['sine', 'square', 'triangle', 'sawtooth', 'impulse', 'step', 'noise', 'harmonics'];
 
 const ParamInput = ({
   label,
@@ -48,8 +48,14 @@ const SignalControls = ({
   onGenerate,
   onReset,
 }: SignalControlsProps) => {
-  const updateParam = (key: keyof SignalParams, value: number) => {
+  const updateParam = (key: keyof SignalParams, value: any) => {
     onParamsChange({ ...params, [key]: value });
+  };
+
+  const updateHarmonic = (index: number, value: number) => {
+    const harms = [...(params.harmonics || [0, 0, 0, 0])];
+    harms[index] = value;
+    updateParam('harmonics', harms);
   };
 
   return (
@@ -75,6 +81,29 @@ const SignalControls = ({
         <ParamInput label="DC" value={params.dcOffset} onChange={v => updateParam('dcOffset', v)} unit="V" />
         <ParamInput label="Fs" value={params.samplingRate} onChange={v => updateParam('samplingRate', v)} unit="S/s" step={100} min={10} />
         <ParamInput label="Dur" value={params.duration} onChange={v => updateParam('duration', v)} unit="s" step={0.1} min={0.01} />
+
+        {signalType === 'harmonics' && (
+          <div className="space-y-2 pt-2 border-t border-border/30">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Harmonics</div>
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} className="flex flex-col gap-1">
+                <div className="flex justify-between items-center px-1">
+                  <span className="text-[9px] text-muted-foreground">H{i + 2} ({((i + 2) * params.frequency).toFixed(0)}Hz)</span>
+                  <span className="text-[9px] text-primary">{(params.harmonics?.[i] || 0).toFixed(2)}</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={params.harmonics?.[i] || 0}
+                  onChange={(e) => updateHarmonic(i, parseFloat(e.target.value))}
+                  className="w-full accent-primary h-1"
+                />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex gap-2 pt-2">

@@ -1,5 +1,4 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import {
     type ModType,
     type ModParams,
@@ -18,18 +17,21 @@ import {
     type MultiFaultConfig,
     createDefaultMultiFaultConfig,
     applyMultiFault,
+    generateSweepSignal,
     hasActiveFaults,
 } from '@/lib/signalEngine';
 import ModulationControls from '@/components/ModulationControls';
 import ModulationCharts from '@/components/ModulationCharts';
+import MainLayout from '@/components/MainLayout';
+import FormulaPanel from '@/components/FormulaPanel';
 
 const fmt = (v: number | null, decimals = 3, unit = '') =>
     v === null || !isFinite(v) ? '—' : `${v.toFixed(decimals)}${unit}`;
 
 const StatRow = ({ label, value }: { label: string; value: string }) => (
-    <div className="flex flex-col gap-0.5">
-        <span className="label-text text-[9px] text-muted-foreground">{label}</span>
-        <span className="font-mono text-xs text-primary">{value}</span>
+    <div className="flex flex-col gap-0.5 border-b border-white/5 pb-1">
+        <span className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">{label}</span>
+        <span className="font-mono text-[10px] text-primary">{value}</span>
     </div>
 );
 
@@ -48,6 +50,18 @@ const ModulationLab = () => {
     const [faultedModulated, setFaultedModulated] = useState<number[]>([]);
     const [demodulated, setDemodulated] = useState<number[] | null>(null);
     const [constellation, setConstellation] = useState<ConstellationPoint[]>([]);
+
+    const [useSweepMessage, setUseSweepMessage] = useState(false);
+    const [sweepParams, setSweepParams] = useState({
+        type: 'linear' as any,
+        fStart: 1,
+        fStop: 100,
+        aStart: 0.5,
+        aStop: 0.5,
+        pStart: 0,
+        pStop: 0,
+        duration: DEFAULT_MOD_PARAMS.T
+    });
 
     const hasFaults = useMemo(() => hasActiveFaults(faultConfig), [faultConfig]);
 
@@ -88,9 +102,17 @@ const ModulationLab = () => {
         }
 
         const timeVec = generateModTimeVector(params.Fs, params.T);
-        const msgSig = generateMessage(timeVec, params.Am, params.Fm);
+        let msgSig: number[];
+
+        if (useSweepMessage) {
+            const { signal } = generateSweepSignal({ ...sweepParams, duration: params.T, enabled: true }, timeVec);
+            msgSig = signal;
+        } else {
+            msgSig = generateMessage(timeVec, params.Am, params.Fm);
+        }
+
         const carrSig = generateCarrier(timeVec, params.Ac, params.Fc);
-        const modSig = modulate(modType, timeVec, params);
+        const modSig = modulate(modType, timeVec, params, msgSig);
         const faulted = applyMultiFault(modSig, timeVec, faultConfig);
         const demod = showDemod ? demodulate(modType, faulted, timeVec, params) : null;
         const const_ = computeConstellation(timeVec, faulted, params, modType);
@@ -103,7 +125,7 @@ const ModulationLab = () => {
         setDemodulated(demod);
         setConstellation(const_);
         setGenerated(true);
-    }, [modType, params, faultConfig, showDemod, isRealSource, t, message]);
+    }, [modType, params, faultConfig, showDemod, isRealSource, t, message, useSweepMessage, sweepParams]);
 
     const handleFaultChange = useCallback(
         (config: MultiFaultConfig) => {
@@ -163,39 +185,10 @@ const ModulationLab = () => {
     const displaySignal = hasFaults ? faultedModulated : modulated;
 
     return (
-        <div className="min-h-screen bg-background grid-background">
-            {/* Header */}
-            <header className="border-b border-border/50 px-4 py-2 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-primary animate-pulse-neon" />
-                    <h1 className="font-display text-sm font-bold tracking-wider neon-text">MODULATION LAB</h1>
-                    <span className="text-[10px] text-muted-foreground tracking-wider">v1.0</span>
-                    <Link to="/" className="signal-button text-[10px] ml-2">Signal Gen</Link>
-                    <Link to="/real-signal" className="signal-button text-[10px]">Real Signal Lab</Link>
-                    <Link to="/recording" className="signal-button text-[10px]">Recording Lab</Link>
-                </div>
-                <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-muted-foreground font-mono">{modType}</span>
-                    {generated && (
-                        <label className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={showDemod}
-                                onChange={e => setShowDemod(e.target.checked)}
-                                className="accent-primary w-3 h-3"
-                            />
-                            <span className="label-text">Show Demod</span>
-                        </label>
-                    )}
-                    <Link to="/" className="signal-button text-[10px]">← Signal Gen</Link>
-                    <Link to="/real-signal" className="signal-button text-[10px]">Real Signal Lab →</Link>
-                </div>
-            </header>
-
-            {/* Main Layout */}
-            <div className="flex h-[calc(100vh-41px)]">
+        <MainLayout activeLab="modulation">
+            <div className="flex h-full">
                 {/* Left Sidebar */}
-                <aside className="w-[260px] shrink-0 border-r border-border/50 overflow-y-auto p-3 space-y-3">
+                <aside className="w-[260px] shrink-0 border-r border-border/50 overflow-y-auto p-3 space-y-3 bg-black/10">
                     <ModulationControls
                         modType={modType}
                         params={params}
@@ -210,71 +203,87 @@ const ModulationLab = () => {
                         onExport={exportCSV}
                         isRealSource={isRealSource}
                     />
+
+                    <div className="glass-panel p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                            <div className="section-title uppercase tracking-widest text-[10px]">Sweep Message</div>
+                            <button
+                                onClick={() => setUseSweepMessage(!useSweepMessage)}
+                                className={`signal-button text-[9px] h-6 px-3 ${useSweepMessage ? 'signal-button-active' : ''}`}
+                            >
+                                {useSweepMessage ? 'ON' : 'OFF'}
+                            </button>
+                        </div>
+                        {useSweepMessage && (
+                            <div className="space-y-3 pt-2 border-t border-white/5">
+                                <div className="space-y-1">
+                                    <span className="text-[9px] text-muted-foreground uppercase">Freq: {sweepParams.fStart}Hz → {sweepParams.fStop}Hz</span>
+                                    <div className="grid grid-cols-2 gap-1 text-[8px]">
+                                        <button onClick={() => setSweepParams({ ...sweepParams, type: 'linear' })} className={`signal-button h-6 ${sweepParams.type === 'linear' ? 'signal-button-active' : ''}`}>LIN</button>
+                                        <button onClick={() => setSweepParams({ ...sweepParams, type: 'logarithmic' })} className={`signal-button h-6 ${sweepParams.type === 'logarithmic' ? 'signal-button-active' : ''}`}>LOG</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </aside>
 
                 {/* Center - Charts */}
-                <main className="flex-1 flex flex-col p-3 gap-3 min-w-0">
-                    <ModulationCharts
-                        t={t}
-                        message={message}
-                        carrier={carrier}
-                        modulated={displaySignal}
-                        demodulated={demodulated}
-                        frequencies={fft.frequencies}
-                        magnitudes={fft.magnitudes}
-                        constellation={constellation}
-                        modType={modType}
-                        showDemod={showDemod}
-                    />
+                <main className="flex-1 flex flex-col p-3 gap-3 min-w-0 bg-black/5">
+                    <div className="flex-1 bg-black/20 rounded-lg border border-border/30 overflow-hidden">
+                        <ModulationCharts
+                            t={t}
+                            message={message}
+                            carrier={carrier}
+                            modulated={displaySignal}
+                            demodulated={demodulated}
+                            frequencies={fft.frequencies}
+                            magnitudes={fft.magnitudes}
+                            constellation={constellation}
+                            modType={modType}
+                            showDemod={showDemod}
+                        />
+                    </div>
                 </main>
 
                 {/* Right Sidebar - Feature Stats */}
                 {generated && features && (
-                    <aside className="w-[180px] shrink-0 border-l border-border/50 overflow-y-auto p-3 space-y-3">
+                    <aside className="w-[220px] shrink-0 border-l border-border/50 overflow-y-auto p-3 space-y-3 bg-black/20">
+                        <FormulaPanel
+                            type="modulation"
+                            modType={modType}
+                            modParams={params}
+                            useSweepMessage={useSweepMessage}
+                        />
+
                         <div className="glass-panel p-3 space-y-3">
-                            <div className="section-title">Signal Features</div>
+                            <div className="section-title uppercase tracking-widest">Signal Features</div>
                             <div className="space-y-2.5">
-                                <StatRow label="Power" value={fmt(features.power, 4, ' W')} />
-                                <StatRow label="Bandwidth" value={features.bandwidth !== null ? fmt(features.bandwidth, 1, ' Hz') : '—'} />
-                                <StatRow label="SNR" value={features.snr !== null ? fmt(features.snr, 2, ' dB') : '—'} />
+                                <StatRow label="RMS Power" value={fmt(features.power, 4, ' W')} />
+                                <StatRow label="Estimated BW" value={features.bandwidth !== null ? fmt(features.bandwidth, 1, ' Hz') : '—'} />
+                                <StatRow label="System SNR" value={features.snr !== null ? fmt(features.snr, 2, ' dB') : '—'} />
                             </div>
                         </div>
 
                         <div className="glass-panel p-3 space-y-3">
-                            <div className="section-title">Parameters</div>
+                            <div className="section-title uppercase tracking-widest">Active State</div>
                             <div className="space-y-2.5">
-                                <StatRow label="Type" value={modType} />
-                                <StatRow label="Fc" value={`${params.Fc} Hz`} />
-                                <StatRow label="Fm" value={`${params.Fm} Hz`} />
-                                <StatRow label="Ac" value={`${params.Ac} V`} />
-                                <StatRow label="Am" value={`${params.Am} V`} />
-                                <StatRow label="Fs" value={`${params.Fs} S/s`} />
-                                <StatRow label="T" value={`${params.T} s`} />
-                                {modType === 'AM' && <StatRow label="ka" value={params.ka.toFixed(2)} />}
-                                {modType === 'FM' && <StatRow label="β" value={params.beta.toString()} />}
-                                {modType === 'PM' && <StatRow label="kp" value={params.kp.toString()} />}
-                                {modType === 'FSK' && (
-                                    <>
-                                        <StatRow label="F1" value={`${params.F1} Hz`} />
-                                        <StatRow label="F0" value={`${params.F0} Hz`} />
-                                    </>
-                                )}
-                                {(['ASK', 'FSK', 'PSK', 'QPSK'] as ModType[]).includes(modType) && (
-                                    <StatRow label="Bit Rate" value={`${params.bitRate} bps`} />
-                                )}
+                                <StatRow label="Scheme" value={modType} />
+                                <StatRow label="Carrier" value={`${params.Fc} Hz`} />
+                                <StatRow label="Samplerate" value={`${params.Fs} S/s`} />
                             </div>
                         </div>
 
                         {hasFaults && (
-                            <div className="glass-panel p-3">
-                                <div className="section-title mb-2">Fault Active</div>
-                                <p className="text-[10px] text-destructive">Fault injection applied to modulated signal</p>
+                            <div className="glass-panel p-3 border-destructive/30 bg-destructive/5">
+                                <div className="text-[9px] font-bold text-destructive uppercase tracking-widest mb-1">Fault Alert</div>
+                                <p className="text-[10px] text-muted-foreground leading-tight">Injection active on modulated carrier signal.</p>
                             </div>
                         )}
                     </aside>
                 )}
             </div>
-        </div>
+        </MainLayout>
     );
 };
 
