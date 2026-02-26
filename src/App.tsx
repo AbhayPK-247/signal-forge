@@ -4,7 +4,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
+import ModulationLab from "./pages/ModulationLab";
+import RealSignalLab from "./pages/RealSignalLab";
 import NotFound from "./pages/NotFound";
+import RecordingLab from "./pages/RecordingLab";
 
 const queryClient = new QueryClient();
 
@@ -16,6 +19,9 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/modulation" element={<ModulationLab />} />
+          <Route path="/real-signal" element={<RealSignalLab />} />
+          <Route path="/recording" element={<RecordingLab />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

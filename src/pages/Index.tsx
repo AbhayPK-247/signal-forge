@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   type SignalType,
   type SignalParams,
@@ -139,6 +140,9 @@ const Index = () => {
           <span className="text-[10px] text-muted-foreground tracking-wider">v2.0</span>
         </div>
         <div className="flex items-center gap-2">
+          <Link to="/modulation" className="signal-button text-[10px]">Modulation Lab →</Link>
+          <Link to="/real-signal" className="signal-button text-[10px]">Real Signal Lab →</Link>
+          <Link to="/recording" className="signal-button text-[10px]">Recording Lab →</Link>
           {generated && (
             <>
               <button onClick={exportCSV} className="signal-button text-[10px]">
