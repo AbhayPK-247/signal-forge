@@ -16,6 +16,7 @@ import SweepLab from "@/pages/SweepLab";
 import BodeLab from "./pages/BodeLab";
 import SystemLab from "./pages/SystemLab";
 import VirtualLab from "./pages/VirtualLab";
+import VoiceAnalyzer from "./pages/VoiceAnalyzer";
 
 const queryClient = new QueryClient();
 
@@ -34,6 +35,7 @@ const App = () => (
           <Route path="/spectrum" element={<SpectrumLab />} />
           <Route path="/communication" element={<CommunicationLab />} />
           <Route path="/dataset" element={<DatasetLab />} />
+          <Route path="/voice" element={<VoiceAnalyzer />} />
           <Route path="/sweep" element={<SweepLab />} />
           <Route path="/bode" element={<BodeLab />} />
           <Route path="/system" element={<SystemLab />} />

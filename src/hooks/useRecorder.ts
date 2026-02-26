@@ -21,7 +21,7 @@ interface UseRecorderResult {
  * useRecorder - High-performance audio capture/replay using Web Audio API.
  * Uses a large internal buffer (Float32Array) to handle up to 5-min sessions.
  */
-export function useRecorder(maxMinutes: number = 5): UseRecorderResult {
+export function useRecorder(maxMinutes: number = 5, onChunk?: (chunk: Float32Array) => void): UseRecorderResult {
     const [status, setStatus] = useState<RecorderStatus>('idle');
     const [duration, setDuration] = useState(0);
 
@@ -89,6 +89,15 @@ export function useRecorder(maxMinutes: number = 5): UseRecorderResult {
 
             processor.onaudioprocess = (e) => {
                 const input = e.inputBuffer.getChannelData(0);
+
+                // Invoke callback if provided
+                if (onChunk) {
+                    try {
+                        onChunk(input);
+                    } catch (err) {
+                        console.error('onChunk callback error:', err);
+                    }
+                }
 
                 // Store in master buffer
                 if (writePosRef.current + input.length < maxSamples) {

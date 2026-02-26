@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Plot from 'react-plotly.js';
 import type { SignalSource } from '@/components/RealSignalControls';
 import type { ParsedSignal } from '@/lib/realSignalEngine';
+import SpectrogramChart from './SpectrogramChart';
 
 const FONT_COLOR = '#94a3b8';
 const COLORS = {
@@ -28,7 +29,7 @@ function baseLayout(title: string): Partial<Plotly.Layout> {
 
 const CFG: Partial<Plotly.Config> = { displayModeBar: false, responsive: true };
 
-type ChartTab = 'oscilloscope' | 'fft' | 'histogram' | 'comparison';
+type ChartTab = 'oscilloscope' | 'fft' | 'histogram' | 'comparison' | 'spectrogram';
 
 interface RealSignalChartsProps {
     source: SignalSource;
@@ -38,6 +39,14 @@ interface RealSignalChartsProps {
     getFreqData: () => Float32Array;
     micSampleRate: number;
     fftSize: number;
+    // optional spectrogram data (live or file)
+    spectrogram?: {
+        times: number[];
+        frequencies: number[];
+        power: number[][];
+    };
+    /** Optional canvas ref for spectrogram export */
+    spectrogramCanvasRef?: React.RefObject<HTMLCanvasElement>;
     // File / comparison
     parsedFile: ParsedSignal | null;
     faultedSignal: number[] | null;
@@ -277,6 +286,8 @@ const StaticCharts = ({
 // ── Main component ────────────────────────────────────────────────────────────
 const RealSignalCharts = ({
     source, micStatus, getSamples, getFreqData, micSampleRate, fftSize,
+    spectrogram,
+    spectrogramCanvasRef,
     parsedFile, faultedSignal, idealTime, idealSignal, showFaulted,
 }: RealSignalChartsProps) => {
     const [tab, setTab] = useState<ChartTab>('oscilloscope');
@@ -286,6 +297,7 @@ const RealSignalCharts = ({
     const TABS: { key: ChartTab; label: string; show: boolean }[] = [
         { key: 'oscilloscope', label: 'Oscilloscope', show: true },
         { key: 'fft', label: 'FFT Spectrum', show: true },
+        { key: 'spectrogram', label: 'Spectrogram', show: !!spectrogram },
         { key: 'histogram', label: 'Histogram', show: hasFile || !isLive },
         { key: 'comparison', label: 'Comparison', show: source === 'comparison' },
     ];
@@ -327,7 +339,14 @@ const RealSignalCharts = ({
                 </div>
             ) : (
                 <div className="flex-1 min-h-0 oscilloscope-display">
-                    {isLive ? (
+                            {tab === 'spectrogram' && spectrogram ? (
+                        <SpectrogramChart
+                            ref={spectrogramCanvasRef ?? null}
+                            times={spectrogram.times}
+                            frequencies={spectrogram.frequencies}
+                            power={spectrogram.power}
+                        />
+                    ) : isLive ? (
                         <LiveOscilloscope
                             getSamples={getSamples}
                             getFreqData={getFreqData}

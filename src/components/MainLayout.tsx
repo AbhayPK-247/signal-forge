@@ -29,6 +29,7 @@ const labs = [
     { id: 'system', name: 'System Sim', path: '/system', icon: Monitor },
     { id: 'virtual', name: 'Virtual Lab', path: '/virtual', icon: Monitor },
     { id: 'datasets', name: 'Dataset Lab', path: '/dataset', icon: Database },
+    { id: 'voice', name: 'Voice Analyzer', path: '/voice', icon: Mic },
 ];
 
 const MainLayout = ({ children, activeLab }: MainLayoutProps) => {
