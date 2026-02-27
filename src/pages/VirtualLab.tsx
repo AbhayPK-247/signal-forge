@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import MainLayout from '@/components/MainLayout';
 import {
     SignalType,
@@ -41,13 +41,56 @@ const VirtualLab = () => {
 
     const activeLayer = layers.find(l => l.id === activeLayerId) || layers[0];
 
+    // derived oscilloscope display parameters
+    const voltDiv = `${activeLayer.params.amplitude.toFixed(2)}V/div`;
+    const timeDiv = `${(activeLayer.params.duration / 10).toFixed(3)}s/div`;
+    const sampleRate = activeLayer.params.samplingRate;
+
     // --- Oscilloscope State ---
     const [time, setTime] = useState<number[]>([]);
+    const [showMobileControls, setShowMobileControls] = useState(false);
     const [signal, setSignal] = useState<number[]>([]);
     const [stats, setStats] = useState<any>(null);
     const [fft, setFFT] = useState<{ frequencies: number[], magnitudes: number[] } | null>(null);
 
+    const peakFreq = (() => {
+        if (!fft) return 0;
+        const idx = fft.magnitudes.reduce((maxIdx, val, i, arr) => (val > arr[maxIdx] ? i : maxIdx), 0);
+        return fft.frequencies[idx] || 0;
+    })();
+
+    // trigger/status info
+    const [triggerMode, setTriggerMode] = useState<'AUTO'|'NORMAL'|'SINGLE'>('AUTO');
+    const [triggerEdge, setTriggerEdge] = useState<'Rising'|'Falling'>('Rising');
+    const [triggerLevel, setTriggerLevel] = useState<number>(0);
+
     // --- Simulation Loop ---
+    const oscilloscopeRef = useRef<HTMLDivElement>(null);
+    const [isRunning, setIsRunning] = useState<boolean>(true);
+
+    const exportOscilloscopeImage = () => {
+        const container = oscilloscopeRef.current;
+        if (!container) return;
+        const svg = container.querySelector('svg');
+        if (!svg) return;
+        const xml = new XMLSerializer().serializeToString(svg);
+        const svg64 = btoa(xml);
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0);
+            const png = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.href = png;
+            link.download = 'oscilloscope.png';
+            link.click();
+        };
+        img.src = 'data:image/svg+xml;base64,' + svg64;
+    };
+
     const updateSimulation = useCallback(() => {
         if (layers.length === 0) return;
 
@@ -71,9 +114,18 @@ const VirtualLab = () => {
         setFFT(psd);
     }, [layers]);
 
+    // update simulation continuously when running
     useEffect(() => {
-        updateSimulation();
-    }, [updateSimulation]);
+        let frame: number;
+        const loop = () => {
+            updateSimulation();
+            frame = requestAnimationFrame(loop);
+        };
+        if (isRunning) {
+            frame = requestAnimationFrame(loop);
+        }
+        return () => cancelAnimationFrame(frame);
+    }, [updateSimulation, isRunning]);
 
     const addLayer = () => {
         const id = Math.random().toString(36).substr(2, 9);
@@ -131,9 +183,11 @@ const VirtualLab = () => {
                     </div>
                 </div>
 
-                <div className="flex-1 flex gap-4 min-h-0">
+                <div className="flex-1 flex flex-col md:flex-row gap-4 min-h-0">
                     {/* LEFT: FUNCTION GENERATOR (FG) */}
-                    <aside className="w-[340px] flex flex-col gap-4 overflow-y-auto pr-1">
+                    <aside className={`w-full md:w-[340px] flex flex-col gap-4 overflow-y-auto pr-1 bg-background md:bg-transparent shadow-lg md:shadow-none z-30
+                        ${showMobileControls ? 'block absolute inset-0' : 'hidden md:flex'}`}>
+
                         <div className="glass-panel p-5 space-y-5 border-primary/20 bg-primary/5">
                             <div className="flex items-center justify-between">
                                 <span className="text-[11px] font-black uppercase tracking-[0.2em] text-primary flex items-center gap-2">
@@ -245,6 +299,51 @@ const VirtualLab = () => {
                             </div>
                             {stats && <StatsDisplay stats={stats} />}
                         </div>
+
+                        {/* additional oscilloscope controls */}
+                        <div className="glass-panel p-4 space-y-3 border-secondary/20 bg-secondary/5">
+                            <div className="text-[11px] font-black uppercase tracking-[0.2em] text-secondary flex items-center gap-2">
+                                <Monitor className="w-3.5 h-3.5" /> SCOPE CONTROLS
+                            </div>
+                            <div className="space-y-2">
+                                <div className="flex justify-between items-center">
+                                    <label className="text-[9px] uppercase">Volt/Div</label>
+                                    <input type="number" value={activeLayer.params.amplitude.toFixed(2)} readOnly className="control-input w-16 text-right" />
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <label className="text-[9px] uppercase">Time/Div</label>
+                                    <input type="number" value={(activeLayer.params.duration/10).toFixed(3)} readOnly className="control-input w-16 text-right" />
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <label className="text-[9px] uppercase">Offset</label>
+                                    <input type="number" value={0} readOnly className="control-input w-16 text-right" />
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <label className="text-[9px] uppercase">Trigger</label>
+                                    <span className="text-[9px] font-mono text-primary">{triggerMode}</span>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 pt-2">
+                                <button
+                                    className="action-button text-[9px] py-1 flex-1"
+                                    onClick={() => setIsRunning(true)}
+                                >Start</button>
+                                <button
+                                    className="action-button text-[9px] py-1 flex-1"
+                                    onClick={() => setIsRunning(false)}
+                                >Stop</button>
+                            </div>
+                            <button
+                                className="action-button w-full text-[9px] py-1 mt-2"
+                                onClick={() => {
+                                    // simple autoscale: adjust amplitude to peak
+                                    if (stats) {
+                                        const p2p = stats.peakToPeak || 1;
+                                        updateActiveParams({ amplitude: p2p/2 });
+                                    }
+                                }}
+                            >Autoscale</button>
+                        </div>
                     </aside>
 
                     {/* RIGHT: OSCILLOSCOPE (DSO) */}
@@ -253,21 +352,77 @@ const VirtualLab = () => {
                         <div className="flex-[2] flex flex-col bg-black/60 rounded-2xl border border-white/5 p-6 shadow-inner relative group">
                             <div className="flex items-center justify-between mb-6 z-10">
                                 <div className="flex items-center gap-3">
+                                    <button
+                                        className="md:hidden p-1 bg-black/20 rounded"
+                                        onClick={() => setShowMobileControls(!showMobileControls)}
+                                    >☰</button>
                                     <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
                                     <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white">Digital Oscilloscope</span>
                                 </div>
-                                <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-full border border-white/10">
-                                    <span className="text-[9px] font-mono text-muted-foreground uppercase">CH1: 1.00V/DIV</span>
-                                    <span className="text-[9px] font-mono text-muted-foreground uppercase ml-2">TIME: 20ms/DIV</span>
+                                <div className="flex flex-wrap items-center gap-2 bg-black/40 px-3 py-1.5 rounded-full border border-white/10 text-[9px] font-mono text-muted-foreground uppercase">
+                                    <span>CH1 {voltDiv}</span>
+                                    <span>TIME {timeDiv}</span>
+                                    <span>TRIG {triggerMode}</span>
+                                    <span>FS {sampleRate}S/s</span>
+                                </div>
+                            </div>
+
+                            {/* trigger panel overlay */}
+                            <div className="absolute top-16 left-6 glass-panel p-2 w-40 text-[9px]">
+                                <div className="section-title mb-1">Trigger</div>
+                                <div className="flex items-center gap-1 mb-1">
+                                    {(['AUTO', 'NORMAL', 'SINGLE'] as const).map(mode => (
+                                        <button
+                                            key={mode}
+                                            onClick={() => setTriggerMode(mode)}
+                                            className={`px-1 rounded ${triggerMode===mode ? 'bg-primary text-black' : 'bg-black/20 text-muted-foreground'}`}
+                                        >
+                                            {mode}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="mb-1">
+                                    <label className="block">Level</label>
+                                    <input
+                                        type="range"
+                                        min={-5}
+                                        max={5}
+                                        step={0.01}
+                                        value={triggerLevel}
+                                        onChange={e => setTriggerLevel(parseFloat(e.target.value))}
+                                        className="w-full"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    {(['Rising', 'Falling'] as const).map(edge => (
+                                        <button
+                                            key={edge}
+                                            onClick={() => setTriggerEdge(edge)}
+                                            className={`px-1 rounded ${triggerEdge===edge ? 'bg-primary text-black' : 'bg-black/20 text-muted-foreground'}`}
+                                        >
+                                            {edge}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
 
                             <div className="flex-1 min-h-0 relative">
-                                <div className="absolute inset-0 grid-background opacity-20 pointer-events-none" />
-                                <WaveformChart time={time} original={[]} faulted={signal} showOriginal={false} />
+                                <div className="absolute inset-0 oscilloscope-grid opacity-20 pointer-events-none" />
+                                <WaveformChart ref={null} containerRef={oscilloscopeRef} time={time} original={[]} faulted={signal} showOriginal={false} />
                             </div>
 
-                            <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {/* measurement strip */}
+                            <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[9px] text-muted-foreground py-1 flex justify-around">
+                                <span>Freq: {peakFreq.toFixed(2)}Hz</span>
+                                <span>P‑P: {stats?.peakToPeak?.toFixed(3)}</span>
+                                <span>RMS: {stats?.rms?.toFixed(3)}</span>
+                                <span>Mean: {stats?.mean?.toFixed(3)}</span>
+                            </div>
+
+                            <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                                <button onClick={exportOscilloscopeImage} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-colors" title="Export Screenshot">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618V15.38a1 1 0 01-1.447.894L15 14m-6 0l-4.553 2.276A1 1 0 013 15.382V8.618a1 1 0 01.553-.894L9 10m6 0v4m0 0H9m6-4H9" /></svg>
+                                </button>
                                 <button className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-colors">
                                     <Maximize2 className="w-4 h-4" />
                                 </button>

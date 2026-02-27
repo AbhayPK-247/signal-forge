@@ -291,6 +291,7 @@ const RealSignalCharts = ({
     parsedFile, faultedSignal, idealTime, idealSignal, showFaulted,
 }: RealSignalChartsProps) => {
     const [tab, setTab] = useState<ChartTab>('oscilloscope');
+    const [spectrogramDark, setSpectrogramDark] = useState(true);
     const isLive = source === 'microphone' && micStatus === 'live';
     const hasFile = parsedFile !== null;
 
@@ -315,6 +316,34 @@ const RealSignalCharts = ({
                         {t.label}
                     </button>
                 ))}
+                {tab === 'spectrogram' && (
+                    <>
+                        <button
+                            onClick={() => setSpectrogramDark(d => !d)}
+                            className="ml-2 text-[9px] px-2 py-1 bg-black/20 rounded"
+                        >
+                            {spectrogramDark ? 'Dark' : 'Light'}
+                        </button>
+                        {spectrogramCanvasRef && spectrogram && (
+                            <button
+                                onClick={() => {
+                                    const c = spectrogramCanvasRef.current;
+                                    if (c) {
+                                        const url = c.toDataURL('image/png');
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = 'spectrogram.png';
+                                        a.click();
+                                    }
+                                }}
+                                className="ml-2 text-[9px] px-2 py-1 bg-black/20 rounded"
+                                title="Export Spectrogram"
+                            >
+                                📷
+                            </button>
+                        )}
+                    </>
+                )}
                 {isLive && (
                     <span className="ml-auto text-[9px] text-primary animate-pulse font-mono self-center">● LIVE</span>
                 )}
@@ -345,6 +374,7 @@ const RealSignalCharts = ({
                             times={spectrogram.times}
                             frequencies={spectrogram.frequencies}
                             power={spectrogram.power}
+                            darkMode={spectrogramDark}
                         />
                     ) : isLive ? (
                         <LiveOscilloscope

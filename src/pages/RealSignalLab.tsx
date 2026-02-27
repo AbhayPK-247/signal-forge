@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useMicrophone } from '@/hooks/useMicrophone';
 import { useAudioPlayer } from '@/hooks/useAudioPlayer';
 import {
@@ -155,6 +155,8 @@ const RealSignalLab = () => {
         window.location.href = '/modulation?source=real';
     }, [source, getSamples, micState.sampleRate, parsedFile, showFaulted, faultedSignal]);
 
+    const specRef = useRef<HTMLCanvasElement>(null);
+
     return (
         <MainLayout activeLab="real-signal">
             <div className="flex h-full">
@@ -195,6 +197,7 @@ const RealSignalLab = () => {
                             getFreqData={getFreqData}
                             micSampleRate={micState.sampleRate}
                             fftSize={fftSize}
+                            spectrogramCanvasRef={specRef}
                             parsedFile={parsedFile}
                             faultedSignal={faultedSignal}
                             idealTime={idealTime}

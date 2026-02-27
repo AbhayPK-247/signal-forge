@@ -56,8 +56,8 @@ const FilterLab = () => {
 
     return (
         <MainLayout activeLab="filters">
-            <div className="flex h-full">
-                <aside className="w-[280px] shrink-0 border-r border-border/50 overflow-y-auto p-4 space-y-6 bg-black/10">
+            <div className="flex h-full flex-col md:flex-row">
+                <aside className="w-full md:w-[280px] shrink-0 border-r border-border/50 overflow-y-auto p-4 space-y-6 bg-black/10">
                     <SignalControls
                         signalType={signalType}
                         params={params}

@@ -9,9 +9,10 @@ interface WaveformChartProps {
   original: number[];
   faulted: number[];
   showOriginal: boolean;
+  containerRef?: React.Ref<HTMLDivElement>;
 }
 
-const WaveformChart = ({ time, original, faulted, showOriginal }: WaveformChartProps) => {
+const WaveformChart = ({ time, original, faulted, showOriginal, containerRef }: WaveformChartProps) => {
   const [cursor1, setCursor1] = useState<{ time: number; amplitude: number } | null>(null);
   const [cursor2, setCursor2] = useState<{ time: number; amplitude: number } | null>(null);
   const [cursorMode, setCursorMode] = useState(false);
@@ -51,7 +52,7 @@ const WaveformChart = ({ time, original, faulted, showOriginal }: WaveformChartP
   }, [time, original, faulted]);
 
   return (
-    <div className="oscilloscope-display p-2 h-full flex flex-col relative">
+    <div ref={containerRef} className="oscilloscope-display p-2 h-full flex flex-col relative">
       <div className="flex items-center justify-between mb-1 px-2">
         <div className="section-title">Waveform</div>
         <div className="flex gap-2">
@@ -75,7 +76,16 @@ const WaveformChart = ({ time, original, faulted, showOriginal }: WaveformChartP
       <div className="absolute top-12 right-4 z-10 pointer-events-none">
         <OscilloscopeCursors cursor1={cursor1} cursor2={cursor2} />
       </div>
-      <div className="flex-1 min-h-0">
+
+      {/* center crosshair overlay */}
+      <div className="oscilloscope-crosshair">
+        <div className="h-line" />
+        <div className="v-line" />
+      </div>
+
+      <div className="flex-1 min-h-0 relative">
+        {/* bg grid with 10×8 divisions */}
+        <div className="absolute inset-0 oscilloscope-grid opacity-20 pointer-events-none" />
         <ResponsiveContainer width="100%" height="100%">
           <LineChart
             data={data}
@@ -83,7 +93,6 @@ const WaveformChart = ({ time, original, faulted, showOriginal }: WaveformChartP
             onClick={handleChartClick}
             style={{ cursor: cursorMode ? 'crosshair' : 'default' }}
           >
-            <CartesianGrid stroke="rgba(0,230,180,0.06)" strokeDasharray="3 3" />
             <XAxis
               dataKey="t"
               stroke="#5a6f7a"
@@ -105,9 +114,22 @@ const WaveformChart = ({ time, original, faulted, showOriginal }: WaveformChartP
               labelFormatter={(v: number) => `t = ${v.toFixed(4)}s`}
             />
             {showOriginal && (
-              <Line type="monotone" dataKey="original" stroke="rgba(0,230,180,0.3)" strokeWidth={1} dot={false} name="Original" />
+              <Line
+                type="monotone"
+                dataKey="original"
+                className="waveform-ch2"
+                dot={false}
+                name="Original"
+              />
             )}
-            <Line type="monotone" dataKey="faulted" stroke="hsl(170 100% 45%)" strokeWidth={1.5} dot={false} name="Signal" connectNulls={false} />
+            <Line
+              type="monotone"
+              dataKey="faulted"
+              className="waveform-ch1"
+              dot={false}
+              name="Signal"
+              connectNulls={false}
+            />
 
             {cursor1 && (
               <ReferenceLine x={cursor1.time} stroke="hsl(170 100% 45%)" strokeDasharray="3 3" label={{ value: 'C1', position: 'top', fill: 'hsl(170 100% 45%)', fontSize: 10 }} />

@@ -118,8 +118,8 @@ const SweepLab = () => {
 
     return (
         <MainLayout activeLab="sweep">
-            <div className="flex h-full">
-                <aside className="w-[300px] shrink-0 border-r border-border/50 overflow-y-auto p-4 bg-black/10">
+            <div className="flex h-full flex-col md:flex-row">
+                <aside className="w-full md:w-[300px] shrink-0 border-r border-border/50 overflow-y-auto p-4 bg-black/10">
                     <SweepControls
                         params={params}
                         onChange={setParams}

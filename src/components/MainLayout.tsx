@@ -33,25 +33,41 @@ const labs = [
 ];
 
 const MainLayout = ({ children, activeLab }: MainLayoutProps) => {
+    const navRef = React.useRef<HTMLElement>(null);
+
+    React.useEffect(() => {
+        if (!navRef.current) return;
+        const link = navRef.current.querySelector(`a[href][data-id="${activeLab}"]`);
+        if (link) {
+            (link as HTMLElement).scrollIntoView({ behavior: 'smooth', inline: 'center' });
+        }
+    }, [activeLab]);
+
     return (
         <div className="min-h-screen bg-background grid-background flex flex-col overflow-hidden">
             {/* Top Professional Navigation */}
-            <header className="h-14 border-b border-border/50 bg-black/40 backdrop-blur-md flex items-center justify-between px-6 shrink-0 relative z-20">
-                <div className="flex items-center gap-6">
-                    <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded bg-primary flex items-center justify-center">
+            <header className="h-16 md:h-14 border-b border-border/50 bg-black/40 backdrop-blur-md flex items-center justify-between px-6 shrink-0 relative z-20">
+                <div className="flex items-center gap-4 flex-1 overflow-hidden">
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                        <div className="w-6 h-6 md:w-7 md:h-7 rounded bg-primary flex items-center justify-center">
                             <Activity className="w-4 h-4 text-black font-bold" />
                         </div>
-                        <span className="font-display font-black tracking-tighter text-lg neon-text-cyan">SIGNAL FORGE <span className="text-muted-foreground font-light">PRO</span></span>
+                        <span className="font-display font-black tracking-tight text-lg leading-none neon-text-cyan whitespace-nowrap">
+                            SIGNAL FORGE <span className="text-muted-foreground font-light">PRO</span>
+                        </span>
                     </div>
 
-                    <nav className="flex items-center gap-1">
+                    <nav ref={navRef} className="flex items-center gap-1 flex-nowrap overflow-x-auto no-scrollbar py-1">
                         {labs.map(lab => (
                             <Link
                                 key={lab.id}
                                 to={lab.path}
+                                data-id={lab.id}
+                                onClick={(e) => {
+                                    (e.currentTarget as HTMLElement).scrollIntoView({ behavior: 'smooth', inline: 'center' });
+                                }}
                                 className={`
-                  flex items-center gap-2 px-3 py-1.5 rounded-md transition-all duration-200
+                  flex items-center gap-2 px-4 py-2 rounded-md transition-all duration-200 whitespace-nowrap flex-shrink-0
                   ${activeLab === lab.id ? 'bg-primary/10 text-primary border border-primary/20 shadow-[0_0_10px_rgba(34,211,238,0.1)]' : 'text-muted-foreground hover:text-white hover:bg-white/5'}
                 `}
                             >

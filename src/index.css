@@ -92,6 +92,74 @@
     background-size: 40px 40px;
   }
 
+  /* oscilloscope-specific grid: 10×8 major divisions with minor lines */
+  .oscilloscope-grid {
+    background-color: #000000;
+    background-image:
+      /* minor grid (every division) */
+      linear-gradient(#444 1px, transparent 1px),
+      linear-gradient(90deg, #444 1px, transparent 1px),
+      /* major grid (10×8) */
+      linear-gradient(#888 2px, transparent 2px),
+      linear-gradient(90deg, #888 2px, transparent 2px);
+    background-size: 40px 40px, 40px 40px, 400px 320px, 400px 320px;
+    background-position: center center, center center, center center, center center;
+  }
+
+  /* waveform colors and glow for channels */
+  .waveform-ch1 {
+    stroke: #FFD400 !important;
+    stroke-width: 2 !important;
+    filter: drop-shadow(0 0 8px rgba(255,212,0,0.8));
+  }
+  .waveform-ch2 {
+    stroke: #00E5FF !important;
+    stroke-width: 2 !important;
+    filter: drop-shadow(0 0 8px rgba(0,229,255,0.8));
+  }
+  .waveform-ch3 {
+    stroke: magenta !important;
+    stroke-width: 2 !important;
+    filter: drop-shadow(0 0 8px rgba(255,0,255,0.8));
+  }
+  .waveform-ch4 {
+    stroke: green !important;
+    stroke-width: 2 !important;
+    filter: drop-shadow(0 0 8px rgba(0,255,0,0.8));
+  }
+
+  /* center crosshair lines inside oscilloscope display */
+  .oscilloscope-crosshair {
+    pointer-events: none;
+  }
+  .oscilloscope-crosshair .h-line,
+  .oscilloscope-crosshair .v-line {
+    position: absolute;
+    background-color: #888;
+    opacity: 0.3;
+  }
+  .oscilloscope-crosshair .h-line {
+    height: 1px;
+    width: 100%;
+    top: 50%;
+    left: 0;
+  }
+  .oscilloscope-crosshair .v-line {
+    width: 1px;
+    height: 100%;
+    left: 50%;
+    top: 0;
+  }
+
+  /* hide scrollbar for overflow container */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
   .oscilloscope-display {
     @apply glass-panel neon-border;
     background: 
