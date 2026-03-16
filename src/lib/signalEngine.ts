@@ -274,7 +274,8 @@ export type FaultType =
   | 'aliasing'
   | 'timing_jitter'
   | 'sample_loss'
-  | 'power_supply_ripple';
+  | 'power_supply_ripple'
+  | 'crossover_distortion';
 
 export interface FaultParams {
   magnitude: number; // general fault magnitude
@@ -304,42 +305,98 @@ export function applyFault(
     case 'none':
       return [...signal];
 
-    case 'ground_fault':
-      return signal.map(x => x + M);
+    case 'ground_fault': {
+      const duration = t[t.length - 1] || 1;
+      const severity = M / 0.4;
+      const onset = duration * (1 - severity / 5);
+      return signal.map((x, i) => (t[i] >= onset ? 0 : x));
+    }
 
-    case 'ground_loop':
+    case 'ground_loop': {
+      // MATLAB: y = x + humAmp * sin(2*pi*humFreq*t)
+      // M is humAmp, fFault is humFreq
       return signal.map((x, i) => x + M * Math.sin(2 * Math.PI * fFault * t[i]));
+    }
 
     case 'floating_ground': {
-      let drift = 0;
-      return signal.map(x => {
-        drift += gaussianRandom() * M * 0.01;
-        return x + drift;
+      // MATLAB: faulty = clean + drift + emi; clipped = min(max(faulty,-v_rail),v_rail)
+      let randomWalk = 0;
+      return signal.map((x, i) => {
+        // Slow DC drift (baseline wandering) + random walk
+        const drift = 1.2 * Math.sin(2 * Math.PI * 1.5 * t[i]);
+        randomWalk += gaussianRandom() * M * 0.01;
+        // EMI / RF noise
+        const emi = 0.12 * gaussianRandom() + 0.05 * Math.sin(2 * Math.PI * 200 * t[i]);
+        const faulty = x + drift + randomWalk + emi;
+        // Rail clipping (usually +/- 2V in the MATLAB spec)
+        return Math.max(-2.0, Math.min(2.0, faulty));
       });
     }
 
-    case 'emi_rfi':
-      return signal.map((x, i) => x + M * Math.sin(2 * Math.PI * fFault * t[i]));
+    case 'emi_rfi': {
+      // MATLAB: corrupted = clean + emi_fuzz + spike_train
+      return signal.map((x, i) => {
+        const fuzz = 0.12 * gaussianRandom();
+        // Periodic Switching Spikes (RFI) - simulate 200Hz switching
+        const period = 1 / 200;
+        const phase = (t[i] % period) / period;
+        let spike = 0;
+        if (phase < 0.05) { // Spike duration ~5% of period
+          const step = phase * period * 10000; // normalized step for ringing
+          spike = 0.4 * Math.exp(-0.5 * step) * Math.sin(2 * Math.PI * 1500 * t[i]);
+        }
+        return x + fuzz + spike;
+      });
+    }
 
-    case 'open_circuit':
-      return signal.map(x => (Math.random() < M * 0.3 ? 0 : x));
+    case 'open_circuit': {
+      const duration = t[t.length - 1] || 1;
+      const severity = M / 0.4; // back-calculate severity from magnitude
+      const onset = duration * (1 - severity / 5);
+      return signal.map((x, i) => (t[i] >= onset ? 0 : x));
+    }
 
-    case 'short_circuit':
-      return signal.map(() => M);
+    case 'short_circuit': {
+      const duration = t[t.length - 1] || 1;
+      const severity = M / 0.4;
+      const onset = duration * (1 - severity / 5);
+      return signal.map((x, i) => (t[i] >= onset ? 0 : x));
+    }
 
-    case 'cable_attenuation':
-      return signal.map(x => (1 - M) * x);
+    case 'cable_attenuation': {
+      // Frequency-aware attenuation: y = x * exp(-alpha * sqrt(f) * dist)
+      // Simplified for time-domain: M acts as alpha. Higher f is attenuated more.
+      // We'll use a simple low-pass filter effect to simulate high-frequency loss.
+      const alpha = M * 0.5;
+      let lastVal = signal[0];
+      return signal.map(x => {
+        // Simple 1-pole low pass filter
+        const val = lastVal + (x - lastVal) * (1 - alpha);
+        lastVal = val;
+        return val;
+      });
+    }
 
     case 'impedance_mismatch': {
-      const delay = Math.max(1, Math.floor(M * 10));
-      return signal.map((x, i) => x + M * 0.5 * (signal[i - delay] ?? 0));
+      // MATLAB simulation of reflected waves: y = x[t] + R * x[t - delay]
+      const delay = Math.max(1, Math.floor(M * 20)); // Delay depends on severity
+      const R = M * 0.4; // Reflection coefficient
+      return signal.map((x, i) => {
+        const ref1 = signal[i - delay] ?? 0;
+        const ref2 = signal[i - 2 * delay] ?? 0;
+        return x + R * ref1 + (R * R) * ref2;
+      });
     }
 
     case 'noise_injection':
       return signal.map(x => x + M * gaussianRandom());
 
     case 'power_line':
-      return signal.map((x, i) => x + M * Math.sin(2 * Math.PI * 50 * t[i]));
+      return signal.map((x, i) => {
+        // Add 50Hz fundamental + 3rd and 5th harmonics for realism
+        const phase = 2 * Math.PI * 50 * t[i];
+        return x + M * (Math.sin(phase) + 0.2 * Math.sin(3 * phase) + 0.1 * Math.sin(5 * phase));
+      });
 
     case 'signal_clipping': {
       const vMax = M;
@@ -348,7 +405,8 @@ export function applyFault(
     }
 
     case 'signal_distortion':
-      return signal.map(x => x + M * x * x);
+      // Add both even (2nd) and odd (3rd) harmonic distortion
+      return signal.map(x => x + M * (x * x + 0.5 * x * x * x));
 
     case 'sensor_offset':
       return signal.map(x => x + M);
@@ -365,28 +423,62 @@ export function applyFault(
       return signal.map(x => (1 + M) * x);
 
     case 'quantization_error': {
-      const q = Math.abs(M) || 0.1;
-      return signal.map(x => Math.round(x / q) * q);
+      // Use severity to define bit depth: 16-bit to 4-bit
+      const bits = Math.max(4, 16 - Math.floor(M * 3));
+      const levels = Math.pow(2, bits);
+      return signal.map(x => {
+        // Scale to 0-1 range (assuming 2V p-p), quantize, then rescale
+        const scaled = (x + 1) / 2;
+        const quantized = Math.round(scaled * levels) / levels;
+        return quantized * 2 - 1;
+      });
     }
 
     case 'aliasing': {
-      // Undersample then reconstruct
-      const skip = Math.max(2, Math.floor(1 / (1 - M * 0.8)));
-      return signal.map((_, i) => signal[Math.floor(i / skip) * skip] ?? signal[i]);
+      // Undersample then reconstruct (Folding effect)
+      // M=0 -> No aliasing. M=2 -> High aliasing.
+      const downsampleFactor = Math.max(1, Math.floor(1 + M * 4));
+      return signal.map((_, i) => {
+        const sourceIdx = Math.floor(i / downsampleFactor) * downsampleFactor;
+        return signal[sourceIdx] ?? signal[i];
+      });
     }
 
     case 'timing_jitter':
       return signal.map((_, i) => {
-        const jitter = Math.floor(gaussianRandom() * M * 5);
-        const idx = Math.max(0, Math.min(signal.length - 1, i + jitter));
+        // Variation in sampling time (Phase noise)
+        const jitter = gaussianRandom() * M * 2.0;
+        const tJitter = t[i] + (t[1] - t[0]) * jitter;
+        // Interpolate or just take nearest sample for efficiency
+        const offset = Math.round(jitter);
+        const idx = Math.max(0, Math.min(signal.length - 1, i + offset));
         return signal[idx];
       });
 
-    case 'sample_loss':
-      return signal.map(x => (Math.random() < M * 0.2 ? NaN : x));
+    case 'sample_loss': {
+      // Either drop to 0 or hold last value (Severity defines probability)
+      let lastVal = signal[0];
+      const p = M * 0.1;
+      return signal.map(x => {
+        if (Math.random() < p) {
+          // 50/60 chance to hold last value (PLC style), else drop to 0
+          return Math.random() < 0.5 ? lastVal : 0;
+        }
+        lastVal = x;
+        return x;
+      });
+    }
 
     case 'power_supply_ripple':
       return signal.map((x, i) => x + M * Math.sin(2 * Math.PI * fFault * t[i]));
+
+    case 'crossover_distortion': {
+      return signal.map(x => {
+        const deadZone = M;
+        if (Math.abs(x) < deadZone) return 0;
+        return x - Math.sign(x) * deadZone;
+      });
+    }
 
     default:
       return [...signal];
@@ -499,6 +591,7 @@ export const FAULT_LABELS: Record<FaultType, string> = {
   timing_jitter: 'Timing Jitter',
   sample_loss: 'Sample Loss',
   power_supply_ripple: 'Power Supply Ripple',
+  crossover_distortion: 'Crossover Distortion',
 };
 
 // ─── Multi-Fault Configuration ────────────────────────────────────────
@@ -521,7 +614,7 @@ export const FAULT_TYPE_KEYS: FaultTypeKey[] = [
   'noise_injection', 'power_line', 'signal_clipping', 'signal_distortion',
   'sensor_offset', 'sensor_drift', 'sensor_saturation', 'gain_error',
   'quantization_error', 'aliasing', 'timing_jitter', 'sample_loss',
-  'power_supply_ripple',
+  'power_supply_ripple', 'crossover_distortion',
 ];
 
 /** Faults that use a configurable frequency parameter */
