@@ -17,4 +17,16 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-ui': ['react', 'react-dom', 'react-router-dom', 'lucide-react'],
+          'vendor-charts': ['plotly.js', 'react-plotly.js', 'recharts'],
+          'vendor-dsp': ['jszip', 'katex'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 1000,
+  },
 }));
